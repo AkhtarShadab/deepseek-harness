@@ -509,6 +509,52 @@ describe('catalog routes with per-model configuration', () => {
     expect(server.paths).toEqual(['/v1/chat/completions'])
   })
 
+  it('pins a model entry\'s own wire protocol over the catalog\'s', () => {
+    const [catalogModel] = getBuiltinModels('deepseek')
+    if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
+    const resolved = resolveProfiles({
+      deepseek: { models: [{ id: catalogModel.id, api: 'openai-responses' }] },
+    })
+    const [model] = resolved.get('deepseek')?.piProvider?.getModels() ?? []
+    // The entry's declaration wins over the installed entry's own; the
+    // catalog's compat belongs to the old protocol and is not inherited.
+    expect(model?.api).toBe('openai-responses')
+  })
+
+  it('keeps the catalog protocol when the entry names none', () => {
+    const [catalogModel] = getBuiltinModels('deepseek')
+    if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
+    const resolved = resolveProfiles({
+      deepseek: { models: [{ id: catalogModel.id }] },
+    })
+    const [model] = resolved.get('deepseek')?.piProvider?.getModels() ?? []
+    expect(model?.api).toBe(catalogModel.api)
+  })
+
+  it('refuses a hand-declared model whose api this build cannot serve', () => {
+    expect(() => resolveProfiles({
+      deepseek: { models: [{ id: 'deepseek-preview', contextWindow: 4096, maxTokens: 1, api: 'not-a-protocol' }] },
+    })).toThrow(/names api "not-a-protocol"/)
+  })
+
+  it('serves a hand-declared id on a catalog route with its own endpoint and protocol', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness({
+      providers: {
+        deepseek: {
+          apiKeyEnv: KEY_ENV,
+          models: [{ id: 'acme-preview', api: 'openai-completions', baseUrl: `${server.url}/v1` }],
+        },
+      },
+    })
+
+    const result = await assemble(ctx, { provider: 'deepseek', model: 'acme-preview', messages: [] })
+    expect(result.finish).toEqual({ kind: 'stop' })
+    // The hand-declared entry names its own endpoint, so the request reaches
+    // it instead of failing on the route the catalog cannot answer for.
+    expect(server.paths).toEqual(['/v1/chat/completions'])
+  })
+
   it('fails an unconfigured model id before any provider request', async () => {
     const server = await mockServer([])
     const ctx = await harness({

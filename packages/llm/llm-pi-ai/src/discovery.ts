@@ -25,6 +25,7 @@
 import { INVALID_CREDENTIAL_CODE, LlmError, normalizeApiKey } from '@deepseek-ai/dsh-llm'
 import type { LlmDiscoveredModel, LlmModelDiscoveryOperation } from '@deepseek-ai/dsh-llm'
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
+import type { Api, Model } from '@earendil-works/pi-ai'
 import { catalogModels } from './catalog.ts'
 
 /**
@@ -230,9 +231,78 @@ function readListing(body: unknown): LlmDiscoveredModel[] {
 }
 
 /**
+ * Interrogate one model-listing endpoint and read its reply. This is the
+ * network core both discovery paths share: the wire-listing merge for a
+ * catalog route, and the non-catalog interrogation.
+ * @param url - the listing endpoint.
+ * @param api - the protocol whose listing shape the endpoint is asked with.
+ * @param apiKey - the probe credential, when one resolved.
+ * @param headers - deployment-owned headers the route carries.
+ * @param signal - the caller's cancellation signal, when any.
+ * @returns the advertised models in endpoint order.
+ * @throws LlmError when the endpoint refuses or fails the request, or the
+ *   reply is not a model listing.
+ */
+async function readModelListing(
+  url: string,
+  api: string,
+  apiKey: string | undefined,
+  headers: Readonly<Record<string, string>> | undefined,
+  signal: AbortSignal | undefined,
+): Promise<readonly LlmDiscoveredModel[]> {
+  let response: Response
+  try {
+    const sent = new Headers(headers === undefined ? undefined : Object.entries(headers))
+    sent.set('accept', 'application/json')
+    if (api === 'anthropic-messages') {
+      sent.set('anthropic-version', ANTHROPIC_VERSION)
+      if (apiKey !== undefined) sent.set('x-api-key', apiKey)
+    } else if (apiKey !== undefined) {
+      sent.set('authorization', `Bearer ${apiKey}`)
+    }
+    for (const [name, value] of Object.entries(attributionHeaders())) sent.set(name, value)
+    response = await fetch(url, {
+      method: 'GET',
+      headers: sent,
+      ...signal === undefined ? {} : { signal },
+    })
+  } catch (error: unknown) {
+    if (signal?.aborted) {
+      throw new LlmError('model discovery aborted by caller', 'ABORTED', { cause: error })
+    }
+    throw new LlmError(`could not reach ${url}`, 'DISCOVERY_FAILED', { cause: error })
+  }
+  if (!response.ok) {
+    throw new LlmError(
+      `${url} answered ${response.status}${response.status === 401 || response.status === 403 ? '; check the API key' : ''}`,
+      'DISCOVERY_FAILED',
+    )
+  }
+  let text: string
+  try {
+    text = await readBounded(response, url)
+  } catch (error: unknown) {
+    // Cancellation during the body read rejects with the abort reason, which
+    // may be any value; the caller gets the same coded failure it would have
+    // for a cancellation before the request went out.
+    if (signal?.aborted) {
+      throw new LlmError('model discovery aborted by caller', 'ABORTED', { cause: error })
+    }
+    throw error
+  }
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch (error: unknown) {
+    throw new LlmError(`${url} did not answer with JSON`, 'DISCOVERY_FAILED', { cause: error })
+  }
+  return readListing(body)
+}
+
+/**
  * Accept one probe key, or refuse it before the header is built. Without this
- * the `fetch` below would throw a ByteString `TypeError` that this function's
- * catch reports as `could not reach <url>` — blaming the network for a local,
+ * the `fetch` would throw a ByteString `TypeError` that the network catch
+ * reports as `could not reach <url>` — blaming the network for a local,
  * deterministic fault.
  * @param raw - the key typed into the form or read from storage.
  * @returns the trimmed, usable key.
@@ -246,6 +316,72 @@ function usableProbeKey(raw: string): string {
       : 'this provider\'s API key contains characters no HTTP header can carry; paste the raw key only',
     INVALID_CREDENTIAL_CODE,
   )
+}
+
+/** The catalog answer for one installed model: its own metadata and protocol. */
+function catalogCandidate(model: Model<Api>): LlmDiscoveredModel {
+  return {
+    id: model.id,
+    name: model.name,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    inputModalities: [...model.input],
+    api: model.api,
+  }
+}
+
+/**
+ * The protocol a route's listing endpoint is interrogated with: the route's
+ * own when every installed model shares one, otherwise OpenAI Chat
+ * Completions — the listing shape gateways overwhelmingly expose regardless
+ * of what their chat endpoints speak per model.
+ */
+function listingApiFor(installed: ReadonlyMap<string, Model<Api>>): string {
+  const entries = [...installed.values()]
+  const first = entries[0]
+  if (first !== undefined && LISTABLE_PROTOCOLS.has(first.api)
+    && entries.every(model => model.api === first.api)) return first.api
+  return 'openai-completions'
+}
+
+/**
+ * The endpoint a catalog route's listing merge interrogates: the first model
+ * speaking the listing protocol, then any model's. A multi-protocol gateway's
+ * catalog lists its models under one shared listing endpoint while the chat
+ * endpoints differ per protocol, so the listing must be asked at an endpoint
+ * that speaks the listing shape.
+ */
+function catalogRouteEndpoint(installed: ReadonlyMap<string, Model<Api>>, listingApi: string): string | undefined {
+  const entries = [...installed.values()]
+  const speaking = entries.find(model => model.api === listingApi)
+  return (speaking ?? entries[0])?.baseUrl
+}
+
+/**
+ * Merge a live listing over the installed catalog. The catalog stays the
+ * richer truth for the ids it describes; ids the endpoint advertises beyond
+ * it join as candidates carrying the listing endpoint's protocol — the
+ * honest default for a gateway whose chat endpoints speak per model, one the
+ * adopted entry can pin or correct.
+ * @param installed - the installed catalog entries by id.
+ * @param listed - the models the endpoint advertised, in endpoint order.
+ * @param listingApi - the protocol the listing endpoint was interrogated with.
+ * @returns the merged candidates: endpoint order first, then catalog-only ids.
+ */
+function mergeListing(
+  installed: ReadonlyMap<string, Model<Api>>,
+  listed: readonly LlmDiscoveredModel[],
+  listingApi: string,
+): readonly LlmDiscoveredModel[] {
+  const merged = new Map<string, LlmDiscoveredModel>()
+  for (const candidate of listed) {
+    const base = installed.get(candidate.id)
+    merged.set(candidate.id, base === undefined ? { ...candidate, api: listingApi } : catalogCandidate(base))
+  }
+  for (const model of installed.values()) {
+    if (!merged.has(model.id)) merged.set(model.id, catalogCandidate(model))
+  }
+  return [...merged.values()]
 }
 
 /** Host-owned profile inputs that a configuration draft deliberately omits. */
@@ -270,18 +406,48 @@ export async function discoverModels(
   request: LlmModelDiscoveryOperation,
   storedProfile?: () => StoredModelDiscoveryProfile | undefined,
 ): Promise<readonly LlmDiscoveredModel[]> {
-  // A catalog route already has its answer, and a better one: the installed
-  // entries carry context windows and output caps no listing endpoint reports.
-  if (request.provider !== undefined) {
-    const installed = catalogModels(request.provider)
-    if (installed.size > 0) {
-      return [...installed.values()].map(model => ({
-        id: model.id,
-        name: model.name,
-        contextWindow: model.contextWindow,
-        maxTokens: model.maxTokens,
-        inputModalities: [...model.input],
-      }))
+  const installed = request.provider === undefined
+    ? undefined
+    : catalogModels(request.provider)
+  if (installed !== undefined && installed.size > 0) {
+    // The installed entries carry context windows, output caps, and per-model
+    // wire protocols no listing endpoint reports, so they are the baseline.
+    // A live listing still enriches the answer with models the catalog has
+    // not shipped yet; when it cannot be read the catalog alone remains a
+    // complete answer for the ids it knows.
+    const catalogAnswer = (): readonly LlmDiscoveredModel[] =>
+      [...installed.values()].map(model => catalogCandidate(model))
+    const listingApi = listingApiFor(installed)
+    const stored = storedProfile?.()
+    // The merge is opt-in: a draft naming an endpoint is interrogated there,
+    // and a live-configured route is interrogated at the endpoint its catalog
+    // names. A dormant mount — no draft, no live route — answers from the
+    // catalog alone and never reaches the network.
+    const draftUrl = request.baseURL
+    const endpoint = draftUrl !== undefined && draftUrl.length > 0
+      ? draftUrl
+      : stored !== undefined ? catalogRouteEndpoint(installed, listingApi) : undefined
+    if (endpoint === undefined) return catalogAnswer()
+    try {
+      // A key typed into the form wins: it may replace the stored key that is
+      // failing. The credential resolver remains lazy so a typed key cannot
+      // fail over a stored credential it supersedes.
+      const supplied = request.apiKey ?? await stored?.resolveApiKey()
+      const apiKey = supplied === undefined ? undefined : usableProbeKey(supplied)
+      const listed = await readModelListing(
+        listingUrl(endpoint, listingApi),
+        listingApi,
+        apiKey,
+        stored?.headers,
+        request.signal,
+      )
+      return mergeListing(installed, listed, listingApi)
+    } catch (error: unknown) {
+      // The caller's cancellation is theirs; every other listing failure —
+      // unreachable endpoint, refused key, unreadable reply — keeps the
+      // catalog answer the action would have returned without the wire.
+      if (error instanceof LlmError && error.code === 'ABORTED') throw error
+      return catalogAnswer()
     }
   }
   if (request.baseURL === undefined || request.baseURL.length === 0) {
@@ -304,7 +470,6 @@ export async function discoverModels(
       'DISCOVERY_UNSUPPORTED',
     )
   }
-  const url = listingUrl(request.baseURL, api)
   // A key typed into the form wins: it may replace the stored key that is
   // failing. The stored profile is asked past the catalog and protocol checks,
   // and its credential resolver remains lazy so a typed key cannot fail over a
@@ -313,51 +478,5 @@ export async function discoverModels(
   const stored = storedProfile?.()
   const supplied = request.apiKey ?? await stored?.resolveApiKey()
   const apiKey = supplied === undefined ? undefined : usableProbeKey(supplied)
-  let response: Response
-  try {
-    const headers = new Headers(stored?.headers === undefined ? undefined : Object.entries(stored.headers))
-    headers.set('accept', 'application/json')
-    if (api === 'anthropic-messages') {
-      headers.set('anthropic-version', ANTHROPIC_VERSION)
-      if (apiKey !== undefined) headers.set('x-api-key', apiKey)
-    } else if (apiKey !== undefined) {
-      headers.set('authorization', `Bearer ${apiKey}`)
-    }
-    for (const [name, value] of Object.entries(attributionHeaders())) headers.set(name, value)
-    response = await fetch(url, {
-      method: 'GET',
-      headers,
-      ...request.signal === undefined ? {} : { signal: request.signal },
-    })
-  } catch (error: unknown) {
-    if (request.signal?.aborted) {
-      throw new LlmError('model discovery aborted by caller', 'ABORTED', { cause: error })
-    }
-    throw new LlmError(`could not reach ${url}`, 'DISCOVERY_FAILED', { cause: error })
-  }
-  if (!response.ok) {
-    throw new LlmError(
-      `${url} answered ${response.status}${response.status === 401 || response.status === 403 ? '; check the API key' : ''}`,
-      'DISCOVERY_FAILED',
-    )
-  }
-  let text: string
-  try {
-    text = await readBounded(response, url)
-  } catch (error: unknown) {
-    // Cancellation during the body read rejects with the abort reason, which
-    // may be any value; the caller gets the same coded failure it would have
-    // for a cancellation before the request went out.
-    if (request.signal?.aborted) {
-      throw new LlmError('model discovery aborted by caller', 'ABORTED', { cause: error })
-    }
-    throw error
-  }
-  let body: unknown
-  try {
-    body = JSON.parse(text)
-  } catch (error: unknown) {
-    throw new LlmError(`${url} did not answer with JSON`, 'DISCOVERY_FAILED', { cause: error })
-  }
-  return readListing(body)
+  return readModelListing(listingUrl(request.baseURL, api), api, apiKey, stored?.headers, request.signal)
 }

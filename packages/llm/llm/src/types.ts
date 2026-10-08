@@ -324,6 +324,14 @@ export interface LlmDiscoveredModel {
   maxTokens?: number
   /** Accepted input types when disclosed by the catalog or endpoint; absent means unknown. */
   inputModalities?: readonly ModelModality[]
+  /**
+   * Wire protocol when the answer pins one per model. A catalog answer
+   * carries each installed entry's own; a wire listing carries the protocol
+   * its catalog entry speaks, or the protocol the listing endpoint itself
+   * speaks for ids the catalog does not describe. Absent means the route's
+   * protocol applies.
+   */
+  api?: string
 }
 
 /** One adapter-discovered model; catalog membership is advisory, not request validation. */

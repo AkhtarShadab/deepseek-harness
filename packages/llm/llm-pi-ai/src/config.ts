@@ -301,6 +301,17 @@ const reasoningEfforts = z.dict(
 
 /** The fields a `models` entry and a `modelOverrides` value share; only the id's home differs. */
 const modelFields = {
+  /**
+   * Wire protocol for this one model. Absent keeps the installed catalog
+   * entry's own, then the route's; naming one is how a hand-declared model
+   * on a multi-protocol gateway states the format its endpoint serves.
+   */
+  api: z.union(supportedProtocols()),
+  /**
+   * Request endpoint for this one model. Absent keeps the installed catalog
+   * entry's own, then the route's.
+   */
+  baseUrl: z.string(),
   name: z.string(),
   contextWindow: z.number().step(1).min(1),
   maxTokens: z.number().step(1).min(1),

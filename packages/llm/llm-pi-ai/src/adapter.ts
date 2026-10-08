@@ -57,6 +57,7 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { randomUUID } from 'node:crypto'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'
 import { createModels, getSupportedThinkingLevels } from './models.ts'
@@ -198,6 +199,66 @@ function reasoningInfo(
       })),
       ...defaultLevel === undefined ? {} : { defaultEffort: ReasoningEffortId(defaultLevel) },
     },
+  }
+}
+
+/** The session-affinity header OpenCode's gateways require on every request. */
+const OPENCODE_SESSION_HEADER = 'x-opencode-session'
+
+/**
+ * Does this request target an OpenCode gateway (Go, Zen, or a deployment of
+ * one)? OpenCode started requiring a stable per-conversation session id in
+ * `x-opencode-session` on every request (https://opencode.ai/docs/go/#where-can-i-use-it),
+ * answering `400 MissingSessionID` otherwise. The route matches by provider id
+ * (`opencode-go`, `opencode-zen`, …) or by resolved endpoint host, so a
+ * deployment naming its route freely is still recognized.
+ * @param provider - the route's provider id as named in the configuration.
+ * @param baseUrl - the resolved request endpoint, when the model already resolved one.
+ * @returns whether the request targets an OpenCode gateway.
+ */
+function isOpencodeRoute(provider: string, baseUrl: string | undefined): boolean {
+  if (/^opencode/i.test(provider)) return true
+  if (baseUrl === undefined) return false
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase()
+    return host === 'opencode.ai' || host.endsWith('.opencode.ai')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The value for the session-affinity header: the harness conversation id when
+ * one is header-safe (stable across a conversation's turns, which is what the
+ * gateway's routing and prompt-cache affinity want), otherwise a fresh UUID.
+ * @param sessionId - the harness session id, when the caller named one.
+ * @returns a header-safe visible-ASCII session id.
+ */
+function sessionHeaderValue(sessionId: string | undefined): string {
+  return sessionId !== undefined && /^[!-~]{1,200}$/.test(sessionId) ? sessionId : randomUUID()
+}
+
+/**
+ * Add OpenCode session affinity to request headers when the target is an
+ * OpenCode gateway. A deployment-owned header of the same name always wins —
+ * a deployment that pins a session id itself has made that choice explicitly.
+ * @param headers - the headers already assembled for the request.
+ * @param provider - the route's provider id.
+ * @param model - the resolved request model, carrying the effective endpoint.
+ * @param sessionId - the harness conversation id for this request, when any.
+ * @returns the headers to send, with `x-opencode-session` added for OpenCode routes.
+ */
+function withSessionAffinity(
+  headers: Record<string, string>,
+  provider: string,
+  model: Readonly<Pick<Model<Api>, 'baseUrl' | 'id' | 'provider'>>,
+  sessionId: string | undefined,
+): Record<string, string> {
+  if (!isOpencodeRoute(provider, model.baseUrl)) return headers
+  if (Object.keys(headers).some(name => name.toLowerCase() === OPENCODE_SESSION_HEADER)) return headers
+  return {
+    ...headers,
+    [OPENCODE_SESSION_HEADER]: sessionHeaderValue(sessionId),
   }
 }
 
@@ -384,8 +445,15 @@ export class PiAiAdapter extends LlmAdapter {
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
         // Profile headers are deployment-owned; attribution names are
-        // Harness-owned and therefore win collisions.
-        headers: requestHeaders(profile.headers),
+        // Harness-owned and therefore win collisions. OpenCode routes get
+        // session affinity so the gateway routes one conversation to one
+        // cache-warm replica instead of answering `400 MissingSessionID`.
+        headers: withSessionAffinity(
+          requestHeaders(profile.headers),
+          options.provider,
+          model,
+          options.sessionId === undefined ? undefined : String(options.sessionId),
+        ),
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
       let exhausted = false

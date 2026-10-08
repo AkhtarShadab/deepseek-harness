@@ -124,6 +124,66 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.headers[0]?.['user-agent']).toBe(userAgent())
   })
 
+  it('stamps the OpenCode session header on OpenCode routes', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: { 'opencode-go': { apiKeyEnv: 'PI_TEST_KEY', baseURL: server.url } },
+    })
+    await assemble(ctx, {
+      provider: 'opencode-go',
+      model: 'deepseek-v4-flash',
+      messages: [],
+      sessionId: 'conversation-opencode' as never,
+    })
+    expect(server.headers[0]?.['x-opencode-session']).toBe('conversation-opencode')
+  })
+
+  it('falls back to a fresh session id when no conversation id is present', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: { 'opencode-go': { apiKeyEnv: 'PI_TEST_KEY', baseURL: server.url } },
+    })
+    await assemble(ctx, { provider: 'opencode-go', model: 'deepseek-v4-flash', messages: [] })
+    expect(server.headers[0]?.['x-opencode-session']).toMatch(/^\S+$/)
+  })
+
+  it('keeps a deployment-pinned OpenCode session header', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        'opencode-go': {
+          apiKeyEnv: 'PI_TEST_KEY',
+          baseURL: server.url,
+          headers: { 'x-opencode-session': 'deployment-pinned' },
+        },
+      },
+    })
+    await assemble(ctx, {
+      provider: 'opencode-go',
+      model: 'deepseek-v4-flash',
+      messages: [],
+      sessionId: 'conversation-opencode' as never,
+    })
+    expect(server.headers[0]?.['x-opencode-session']).toBe('deployment-pinned')
+  })
+
+  it('sends no OpenCode session header off OpenCode routes', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness(server.url)
+    await assemble(ctx, {
+      model: 'deepseek-v4-flash',
+      messages: [],
+      sessionId: 'conversation-offroute' as never,
+    })
+    expect(server.headers[0]?.['x-opencode-session']).toBeUndefined()
+  })
+
   it('forwards common stream options and profile reasoning', async () => {
     const server = await mockServer([{ events: textEvents }])
     const ctx = await harness(server.url, {

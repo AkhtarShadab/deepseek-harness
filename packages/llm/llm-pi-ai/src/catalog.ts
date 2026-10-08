@@ -14,6 +14,7 @@
 
 import { builtinProviders, getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
+import { supportedProtocols } from './provider.ts'
 import type {
   AnthropicMessagesCompat,
   Api,
@@ -587,6 +588,19 @@ function assertOfferedCompatFields(
 export interface PiAiModelProfile {
   /** Model id sent to the provider and accepted by {@link GenerateOptions.model}. */
   id: string
+  /**
+   * Wire protocol for this one model. Absent keeps the installed catalog
+   * entry's own, then the route's; naming one is how a hand-declared model
+   * on a multi-protocol gateway states the format its endpoint serves.
+   */
+  api?: string
+  /**
+   * Request endpoint for this one model. Absent keeps the installed catalog
+   * entry's own, then the route's; naming one is how a hand-declared model on
+   * a catalog route states the endpoint its gateway serves, when the catalog
+   * provider itself carries no route-level endpoint to inherit.
+   */
+  baseUrl?: string
   /** Display name for selectors; defaults to the catalog name, then the id. */
   name?: string
   /** Maximum combined request and response context in tokens. */
@@ -898,12 +912,16 @@ export function resolveRouteModels(
     if (seen.has(entry.id)) invalid(provider, `lists model "${entry.id}" more than once`)
     seen.add(entry.id)
     const base = defaults.get(entry.id)
-    const api = request.api ?? base?.api ?? routeApi
+    // Route-level `api` still wins: it repoints the whole route at one wire
+    // format. A model entry naming its own protocol beats the catalog entry
+    // it sits on, which is how a model the catalog mislabels is corrected —
+    // and how a hand-declared id the catalog does not describe gets one.
+    const api = request.api ?? entry.api ?? base?.api ?? routeApi
     if (api === undefined) {
       invalid(provider, `model "${entry.id}" needs an api; the installed catalog does not describe it, so set the`
         + ' route\'s api to the wire protocol its endpoint speaks')
     }
-    const baseUrl = request.baseURL ?? base?.baseUrl ?? providerBaseUrl
+    const baseUrl = request.baseURL ?? entry.baseUrl ?? base?.baseUrl ?? providerBaseUrl
     if (baseUrl === undefined) {
       invalid(provider, `model "${entry.id}" needs a baseURL; the installed catalog does not describe this route`)
     }
@@ -922,6 +940,18 @@ export function resolveRouteModels(
     // Only a value the profile named is a deployment choice; the catalog's is
     // the model's capability and stays out of request defaults.
     if (entry.maxTokens !== undefined) configuredMaxTokens.set(entry.id, entry.maxTokens)
+    const compat = resolveModelCompat(provider, entry, request.compat, base, api)
+    // A hand-declared model is served by the route's protocol table, so the
+    // protocol it names must be one this configuration can serve. A catalog
+    // model's protocol is served by its catalog provider — which ships the
+    // implementations its entries name, including protocols this
+    // configuration's table does not list — so only a repoint beyond what that
+    // provider serves surfaces late, at the wire, with the provider's own
+    // "no API implementation" answer.
+    if (base === undefined && api !== undefined && !supportedProtocols().includes(api)) {
+      invalid(provider, `model "${entry.id}" names api "${api}", which this build cannot serve; supported`
+        + ` protocols are ${supportedProtocols().join(', ')}`)
+    }
     return {
       // The installed entry lays the floor, and the fields below override it.
       // Enumerating instead would silently drop every `Model` field this
@@ -939,7 +969,7 @@ export function resolveRouteModels(
       contextWindow,
       maxTokens,
       ...resolveModelReasoning(provider, entry, base),
-      ...resolveModelCompat(provider, entry, request.compat, base, api),
+      ...compat,
     }
   }
   const models: Model<Api>[] = []

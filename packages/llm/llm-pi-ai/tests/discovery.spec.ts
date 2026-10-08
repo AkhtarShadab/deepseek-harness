@@ -82,18 +82,76 @@ describe('catalog-route model discovery', () => {
     expect(models.find(model => model.id === 'gpt-6-astra')).toMatchObject({ inputModalities: installed?.input })
   })
 
-  it('answers from the installed registry, with capacities and no network call', async () => {
-    const server = await listingServer({ body: JSON.stringify({ data: [{ id: 'from-the-endpoint' }] }) })
+  it('merges a live listing over the installed registry, keeping catalog capacities and protocols', async () => {
+    const [first] = getBuiltinModels('deepseek')
+    if (first === undefined) throw new Error('the installed catalog ships no deepseek model')
+    const server = await listingServer({ body: JSON.stringify({ data: [
+      { id: 'from-the-endpoint' },
+      { id: first.id, name: 'endpoint-named' },
+    ] }) })
     const ctx = await harness()
 
     const models = await ctx.llm.discoverModels('llm-pi-ai', { provider: 'deepseek', baseURL: server.url })
 
-    // pi-ai's own registry is the authority for its own providers, and it
-    // carries what a listing endpoint would not disclose.
+    // The catalog keeps its authority for the ids it ships — capacities, input
+    // types, and each model's own wire protocol — while ids only the endpoint
+    // advertises join as candidates carrying the listing endpoint's protocol.
+    const installed = new Map(getBuiltinModels('deepseek').map(model => [model.id, model]))
+    expect(models.map(model => model.id)).toContain('from-the-endpoint')
+    expect(models.find(model => model.id === 'from-the-endpoint')).toMatchObject({
+      name: 'from-the-endpoint',
+      api: 'openai-completions',
+    })
+    const byId = new Map(models.map(model => [model.id, model]))
+    for (const [id, model] of installed) {
+      expect(byId.get(id)).toMatchObject({
+        name: model.name,
+        api: model.api,
+        contextWindow: model.contextWindow,
+        maxTokens: model.maxTokens,
+        inputModalities: [...model.input],
+      })
+    }
+    // A listed id the catalog also ships reads as the catalog entry, not the
+    // endpoint's thinner row.
+    expect(byId.get(first.id)?.name).toBe(first.name)
+  })
+
+  it('keeps a catalog answer when the live listing cannot be read', async () => {
+    const server = await listingServer({ status: 500, body: '{"error": "down"}' })
+    const ctx = await harness()
+
+    const models = await ctx.llm.discoverModels('llm-pi-ai', { provider: 'deepseek', baseURL: server.url })
+
     expect(models.map(model => model.id).sort())
       .toEqual(getBuiltinModels('deepseek').map(model => model.id).sort())
-    expect(models.every(model => (model.contextWindow ?? 0) > 0 && (model.maxTokens ?? 0) > 0)).toBe(true)
+    expect(models.every(model => model.api !== undefined)).toBe(true)
+  })
+
+  it('answers a dormant catalog route from the registry with no network call', async () => {
+    const server = await listingServer({ body: JSON.stringify({ data: [] }) })
+    const ctx = await harness()
+
+    const models = await ctx.llm.discoverModels('llm-pi-ai', { provider: 'deepseek' })
+
+    // No draft endpoint and no live route: the merge has nothing to ask, so
+    // the installed registry is the whole answer and no request is sent.
+    expect(models.map(model => model.id).sort())
+      .toEqual(getBuiltinModels('deepseek').map(model => model.id).sort())
     expect(server.paths).toEqual([])
+  })
+
+  it('carries each installed model\'s own wire protocol', async () => {
+    const ctx = await harness()
+
+    const models = await ctx.llm.discoverModels('llm-pi-ai', { provider: 'opencode-go' })
+
+    const installed = new Map(getBuiltinModels('opencode-go').map(model => [model.id, model]))
+    const byId = new Map(models.map(model => [model.id, model]))
+    expect(byId.size).toBe(installed.size)
+    for (const [id, model] of installed) {
+      expect(byId.get(id)?.api).toBe(model.api)
+    }
   })
 
   it('needs no endpoint for a route the catalog describes', async () => {
