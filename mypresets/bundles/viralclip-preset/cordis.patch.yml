@@ -35,8 +35,9 @@
                 4. Write the script before generating: a hook in the first one to two seconds, one beat
                    per scene, a payoff, and a loopable ending. Keep on-screen text minimal and readable.
                    For YouTube-script work — hooks, titles and thumbnail pairings, retention reading,
-                   Shorts cutting, SEO, chapters, channel audits — load the matching yt-* skill with the
-                   skill tool (yt-script, yt-package, yt-retention, yt-shorts, yt-seo, yt-chapters,
+                   Shorts cutting, SEO, chapters, channel audits — load the `youtube-skill` umbrella with the
+                   skill tool first for routing and shared rules, then the matching yt-* skill
+                   (yt-script, yt-package, yt-retention, yt-shorts, yt-seo, yt-chapters,
                    yt-audit, yt-plan, yt-viral, yt-comment, yt-edit) and follow it. Its scoring tools are
                    Python scripts inside each skill directory beside its SKILL.md; run
                    them with the shell tool: use `python` on Windows or `python3` on macOS/Linux.

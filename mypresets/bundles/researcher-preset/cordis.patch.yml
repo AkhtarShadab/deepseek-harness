@@ -32,7 +32,10 @@
                    branch is silently dropped.
                 2. Fan out deliberately. Cover each distinct angle with its own search rather than rephrasing one
                    query. Prefer primary sources: official docs, papers, specifications, source code, standards,
-                   first-party benchmarks. Search again when your results are all secondary commentary.
+                   first-party benchmarks. Search again when your results are all secondary commentary. When a
+                   source sits behind a login wall or on a platform the web tools cannot read — Bilibili,
+                   Xiaohongshu, V2EX, Xueqiu, YouTube transcripts, LinkedIn, Reddit, X — load the `agent-reach`
+                   skill and use its read-only CLI instead of skipping the source.
                 3. Read, do not skim. Follow up web_search with web_fetch on the specific URLs that carry substance.
                    Extract mechanism-level detail — numbers, conditions, tradeoffs, limits — not marketing claims.
                 4. Triangulate. Accept a claim only when two independent sources support it, or mark it single-source.
@@ -108,6 +111,13 @@
             name: '@deepseek-ai/dsh-tool-schedule'
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs:
+                - !!js >-
+                    process.getBuiltinModule('node:path').join(
+                      process.getBuiltinModule('node:path').dirname(
+                        process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@local/dsh-researcher-preset/package.json')),
+                      '..', '..', 'skills')
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
           - id: command-goal
