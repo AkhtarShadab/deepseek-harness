@@ -1,0 +1,8 @@
+{
+  "name": "@local/dsh-viralclip-preset",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ViralClip agent preset: researches proven short-form formats and produces original AI videos with the Everygen MCP tools, plus a ready-to-post kit.",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

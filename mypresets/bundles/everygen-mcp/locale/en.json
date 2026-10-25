@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Everygen MCP Connection",
+    "description": "Connects the Everygen MCP server so the agent can generate AI videos and images (Shorts, UGC, ads) with its tools, named mcp__everygen__*."
+  }
+}

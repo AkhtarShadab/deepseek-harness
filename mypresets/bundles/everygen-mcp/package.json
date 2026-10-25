@@ -1,0 +1,10 @@
+{
+  "name": "@local/dsh-everygen-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Connects the Everygen MCP server (AI video & image generation) so its tools appear as mcp__everygen__* .",
+  "exports": { "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg" },
+  "files": ["cordis.patch.yml", "locale/*.json", "icon.svg", "everygen-auth.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

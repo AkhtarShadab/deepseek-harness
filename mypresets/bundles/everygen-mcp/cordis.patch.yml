@@ -1,0 +1,24 @@
+# Everygen MCP: connects https://everygen.ai/api/mcp (the endpoint Everygen
+# publishes for Claude/Cursor connectors). Tools appear as mcp__everygen__<tool>.
+# The OAuth helper stores tokens outside this repository under ~/.everygen.
+- insert:
+    - id: everygen-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: everygen
+        transport: streamable-http
+        url: https://everygen.ai/api/mcp
+        headers: !!js >-
+          (() => {
+            const fs = process.getBuiltinModule('node:fs')
+            const path = process.getBuiltinModule('node:path')
+            const os = process.getBuiltinModule('node:os')
+            try {
+              const token = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.everygen', 'tokens.json'), 'utf8')).access_token
+              return token ? { Authorization: `Bearer ${token}` } : {}
+            } catch {
+              return {}
+            }
+          })()
+        failOnStartupError: false
+        toolCallTimeoutMs: 300000

@@ -1,0 +1,28 @@
+{
+  "name": "@local/dsh-system-design-preset",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "System Design learning agent: rigorous, example-driven teaching and guided scalable-systems projects.",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-agent-instructions": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-agent-preset": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-persona": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-time-context": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-ask-user": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-bash": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-fs": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-fs-search": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-goal": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-jobs": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-present": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-pwsh": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-todo": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-web": "^0.2.1-alpha.1"
+  }
+}

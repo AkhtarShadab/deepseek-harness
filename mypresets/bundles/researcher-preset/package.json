@@ -1,0 +1,39 @@
+{
+  "name": "@local/dsh-researcher-preset",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Researcher agent preset: deep multi-source research reported through a What / How / Why model, with study material (theory, examples, tests) prepared for extensive exam-grade coverage.",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-agent-instructions": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-agent-preset": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-command-compact": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-command-goal": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-compaction-basic": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-persona": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-plan-mode": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-time-context": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-ask-user": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-bash": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-fs": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-fs-search": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-goal": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-jobs": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-present": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-pwsh": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-schedule": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-skill": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-subagent": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-subagent-control": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-todo": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-web": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-workflow-ptc": "^0.2.1-alpha.1"
+  }
+}
