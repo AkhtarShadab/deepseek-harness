@@ -393,12 +393,13 @@ export class AgentLoop extends Service implements AgentFactory {
     ctx.effect(() => ctx.agents.setFactory(this), 'agentLoop.setFactory()')
     // Deletion owns the loop's ordered teardown: stop the driver, drain and
     // close the write handle, leave both registries, unwind the scope. The
-    // factory keeps the live-handle map for exactly this disposal capability.
+    // returned promise is awaited by the dispatching registry, so the log is
+    // removed only after teardown settles and clients already saw removal.
     ctx.on('workspace/session-dispose', ({ sessionId }) => {
       const entry = this.liveHandles.get(sessionId)
       if (entry === undefined) return
       this.releasing.add(sessionId)
-      void entry.dispose().finally(() => {
+      return entry.dispose().finally(() => {
         this.releasing.delete(sessionId)
         if (this.liveHandles.get(sessionId) === entry) this.liveHandles.delete(sessionId)
       })

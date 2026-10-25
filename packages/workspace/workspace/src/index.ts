@@ -428,12 +428,13 @@ export class WorkspaceRegistry extends Service {
    * `stopActivity` the `workspace/session-activity` waterfall is asked once
    * and any reported activity rejects with {@link WorkspaceActiveSessionError}
    * before anything is written or removed. With `stopActivity` the activity
-   * question is skipped: the registry first dispatches `workspace/session-stop`
-   * (failures logged, never fatal), then `workspace/session-dispose`, which
-   * makes the Agent's owner tear down the loop, close its write handle, and
-   * leave both registries — emitting `session/disposed`, which the API session
-   * controller relays to clients as `api-session/removed` — so no process
-   * still holds write ownership when the removal runs. Then
+   * question is skipped and `workspace/session-stop` is dispatched first
+   * (failures logged, never fatal). Both paths then await
+   * `workspace/session-dispose`, whose owner tears down the loop, drains and
+   * closes the write handle, and leaves both registries — emitting
+   * `session/disposed`, which the API session controller relays to clients as
+   * `api-session/removed`, so the row disappears without a reload — and no
+   * process still holds write ownership when the removal runs. Then
    * `sessionPersistence.remove(sessionId)` deletes the artifact (unknown id is
    * not an error per the backend contract; a rejection aborts before any
    * state write). Finally one setState drops the id from every workspace
@@ -464,8 +465,12 @@ export class WorkspaceRegistry extends Service {
         if (activity.length > 0) throw new WorkspaceActiveSessionError(sessionId, activity)
       } else {
         await this.stopSessionActivity(sessionId)
-        await this.disposeSessionAgent(sessionId)
       }
+      // Disposal is required in both paths, not only after a stop: the live
+      // write handle refuses `sessionPersistence.remove`, and the disposal's
+      // `session/disposed` is what makes clients drop the row through the
+      // `api-session/removed` relay. It must settle before the log is removed.
+      await this.disposeSessionAgent(sessionId)
       await this.ctx.sessionPersistence.remove(sessionId)
       const state = this.requireState()
       const table = this.requireTable()

@@ -1369,6 +1369,28 @@ describe('registry-global session delete', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("disposing session 'busy' for delete failed"))
   })
 
+  it('disposes the live session before removing its log even without stopActivity', async () => {
+    const dir = await makeDir('delete-quiet-dispose')
+    const result = await harness({ sessions: [header('idle', dir, 100)] })
+    const order: string[] = []
+    let release: () => void = () => {}
+    const disposed = new Promise<boolean>((resolve) => { release = () => { resolve(true) } })
+    result.remove.mockImplementation(async () => { order.push('remove') })
+    result.ctx.on('workspace/session-dispose', async ({ sessionId }) => {
+      order.push(`dispose:${sessionId}`)
+      await disposed
+    })
+    result.ctx.on('domain/changed', (change) => { if (change.table === '') order.push('write') })
+
+    const deleting = result.registry.deleteSession(SessionId('idle'))
+    // A live write handle must be released before the log is touched.
+    await vi.waitFor(() => { expect(order).toEqual(['dispose:idle']) })
+    expect(result.remove).not.toHaveBeenCalled()
+    release()
+    await deleting
+    expect(order).toEqual(['dispose:idle', 'remove', 'write'])
+  })
+
   it('drops the session from persistence even when no provider owns it', async () => {
     const dir = await makeDir('delete-unowned')
     const result = await harness({ sessions: [header('lonely', dir, 100)] })

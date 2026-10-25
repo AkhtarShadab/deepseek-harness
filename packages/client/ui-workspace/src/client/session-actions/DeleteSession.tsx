@@ -34,7 +34,7 @@ export function DeleteSessionMenuItem({
       icon={<IconTrashOutlineRegular size={14} />}
       onSelect={() => {
         setMenuOpen(false)
-        requestSessionDelete(sessionId, displayTitle)
+        requestSessionDelete(sessionId, displayTitle.trim() === '' ? sessionId : displayTitle)
       }}
     >
       {t('menu.deleteSession')}
