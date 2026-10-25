@@ -1,6 +1,10 @@
 ---
 name: agent-reach
-description: Read content the normal web tools cannot reach through the Agent Reach CLI (`agent-reach`): login-walled platforms (Xiaohongshu, Xueqiu, BOSS, LinkedIn, Reddit, X, Facebook, Instagram), Chinese platforms (Bilibili, V2EX, Xiaoyuzhou), YouTube transcripts, GitHub repos/issues, and clean web reads. Use for research that needs these sources; read-only, never posts.
+description: >-
+  Read content the normal web tools cannot reach through the Agent Reach CLI (`agent-reach`):
+  login-walled platforms (Xiaohongshu, Xueqiu, BOSS, LinkedIn, Reddit, X, Facebook, Instagram),
+  Chinese platforms (Bilibili, V2EX, Xiaoyuzhou), YouTube transcripts, GitHub repos and issues, and
+  clean web reads. Use for research that needs these sources; read-only, never posts.
 ---
 
 # Agent Reach

@@ -1,0 +1,18 @@
+# Mount the MyPresets skill root for every session.
+#
+# The Host-level `skill-filesystem` row ships disabled. Enabling it with an
+# isolated custom root makes the `yt-*`, `agent-reach`, and `youtube-skill`
+# skills part of the global skill layer, which is what the slash-command
+# lexicon and unfiltered session catalogs read; presets keep their own
+# scoped providers for their default roots.
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  disabled: false
+  config:
+    includeDefaultRoots: false
+    customSkillDirs:
+      - !!js >-
+          process.getBuiltinModule('node:path').join(
+            process.getBuiltinModule('node:path').dirname(
+              process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@local/dsh-mypresets-skills/package.json')),
+            '..', '..', 'skills')

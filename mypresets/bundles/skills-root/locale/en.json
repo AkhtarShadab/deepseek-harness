@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MyPresets Skills",
+    "description": "Mounts the MyPresets skill root (youtube-skill, agent-reach, and the eleven yt-* skills) as a profile-wide filesystem skill provider so every session lists and can invoke them."
+  }
+}

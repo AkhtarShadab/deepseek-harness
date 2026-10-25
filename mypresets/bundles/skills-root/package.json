@@ -1,0 +1,14 @@
+{
+  "name": "@local/dsh-mypresets-skills",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mounts the MyPresets skill root as the profile-wide filesystem skill provider so every session and the slash catalog see the yt-*, agent-reach, and youtube-skill skills.",
+  "exports": {
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}
