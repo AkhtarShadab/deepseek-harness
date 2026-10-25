@@ -38,6 +38,8 @@ import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
   SessionAddress,
+  SessionAllowAllApprovalsRequest,
+  SessionAllowAllApprovalsValue,
   SessionAttachmentRequest,
   SessionAttachmentValue,
   SessionCancelRequest,
@@ -495,6 +497,20 @@ export class SessionController extends TypertRemoteService {
       throw error
     }
     return { deleted: true }
+  }
+
+  /**
+   * Grant the volatile "allow all" approval policy for one Session: every
+   * later approval ask in this process resolves `allowed-once` without a
+   * prompt, and the grant ends with the Session lifecycle.
+   * @param request - Session identity to grant.
+   * @returns acknowledgement that the grant is active.
+   */
+  @Remote('allowAllApprovals')
+  allowAllApprovals(
+    request: SessionAllowAllApprovalsRequest,
+  ): Promise<SessionAllowAllApprovalsValue> {
+    return this.commands.allowAllApprovals(request)
   }
 
   /**

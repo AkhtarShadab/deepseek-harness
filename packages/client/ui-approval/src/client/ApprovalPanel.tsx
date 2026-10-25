@@ -15,13 +15,23 @@ export function ApprovalPanel(props: ApprovalComposerProps) {
     ? null
     : props.renderSlot('conversation.approval.detail', { callId: approval.callId })
   const reason = approval.displayReason === undefined ? approval.reason : props.resolveReason(approval.displayReason)
-  return <ApprovalFlow key={approval.key} pending={approval} reason={reason} detail={detail} t={props.t} />
+  return (
+    <ApprovalFlow
+      key={approval.key}
+      pending={approval}
+      reason={reason}
+      detail={detail}
+      allowAllApprovals={props.allowAllApprovals}
+      t={props.t}
+    />
+  )
 }
 
-function ApprovalFlow({ pending, reason, detail, t }: {
+function ApprovalFlow({ pending, reason, detail, allowAllApprovals, t }: {
   pending: PendingApproval
   reason: string | undefined
   detail: ReactNode
+  allowAllApprovals: ApprovalComposerProps['allowAllApprovals']
   t: ApprovalComposerProps['t']
 }) {
   const [answered, setAnswered] = useState(false)
@@ -38,6 +48,19 @@ function ApprovalFlow({ pending, reason, detail, t }: {
     waiting.current = true
     setAnswered(true)
     void pending.answer(outcome).catch(() => {
+      if (!active.current || !pending.answerable) return
+      waiting.current = false
+      setAnswered(false)
+    })
+  }
+  // Grant first, then settle this request. A failed grant still allows this
+  // one request (the button must never strand the pending prompt), so the
+  // catch deliberately swallows the Host failure.
+  const allowAll = (): void => {
+    if (waiting.current || !pending.answerable) return
+    waiting.current = true
+    setAnswered(true)
+    void allowAllApprovals(pending.sessionId).catch(() => {}).then(() => pending.answer('allowed-once')).catch(() => {
       if (!active.current || !pending.answerable) return
       waiting.current = false
       setAnswered(false)
@@ -77,6 +100,9 @@ function ApprovalFlow({ pending, reason, detail, t }: {
         <div className={css.actionRow}>
           <Button variant="outline" className={css.reject} disabled={answered} onClick={() => { answer('rejected') }}>
             {t('reject')}
+          </Button>
+          <Button variant="outline" disabled={answered} onClick={allowAll}>
+            {t('allowAll')}
           </Button>
           <Button variant="primary" disabled={answered} onClick={() => { answer('allowed-once') }}>
             {t('allowOnce')}

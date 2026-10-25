@@ -321,12 +321,14 @@ function panelProps(
     'detail.aria': 'Approval details',
     escalation: `Tool ${pending.toolName} asks`,
     reject: 'Reject',
+    allowAll: 'Allow all in this session',
     allowOnce: 'Allow once',
   }
   return {
     matched: pending,
     renderSlot,
     resolveReason: (reason: NonNullable<PendingApproval['displayReason']>) => reason.en,
+    allowAllApprovals: vi.fn(async () => {}),
     t: (key: string) => messages[key] ?? key,
   } as ApprovalComposerProps
 }
@@ -349,25 +351,36 @@ describe('ApprovalPanel', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Allow once' }).disabled).toBe(true)
   })
 
-  it('renders correlated detail and returns allow-once', async () => {
-    const pending = new PendingApproval(id('s1'), {
-      toolName: 'bash',
-      callId: 'call-1' as ToolCallId,
-      reason: 'Run this exact command',
-    })
-    const renderSlot = vi.fn(() => <code>pnpm test</code>)
-    render(<ApprovalPanel {...panelProps(pending, renderSlot)} />)
+  it('grants allow-all for the session and then settles this request', async () => {
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    const props = panelProps(pending)
+    render(<ApprovalPanel {...props} />)
 
-    expect(screen.getByText('Run this exact command')).toBeTruthy()
-    expect(screen.getByText('pnpm test')).toBeTruthy()
-    expect(renderSlot).toHaveBeenCalledWith('conversation.approval.detail', {
-      callId: 'call-1',
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
-    expect(document.querySelector('[data-approval-key] [data-state="ongoing"]')).not.toBeNull()
-    expect(document.querySelector('[data-approval-key]')?.getAttribute('aria-busy')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Allow all in this session' }))
 
+    expect(props.allowAllApprovals).toHaveBeenCalledExactlyOnceWith(id('s1'))
     await expect(pending.result).resolves.toBe('allowed-once')
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Allow once' }).disabled).toBe(true)
+  })
+
+  it('renders correlated detail and returns allow-once', async () => {    const pending = new PendingApproval(id('s1'), {
+    toolName: 'bash',
+    callId: 'call-1' as ToolCallId,
+    reason: 'Run this exact command',
+  })
+  const renderSlot = vi.fn(() => <code>pnpm test</code>)
+  render(<ApprovalPanel {...panelProps(pending, renderSlot)} />)
+
+  expect(screen.getByText('Run this exact command')).toBeTruthy()
+  expect(screen.getByText('pnpm test')).toBeTruthy()
+  expect(renderSlot).toHaveBeenCalledWith('conversation.approval.detail', {
+    callId: 'call-1',
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+  expect(document.querySelector('[data-approval-key] [data-state="ongoing"]')).not.toBeNull()
+  expect(document.querySelector('[data-approval-key]')?.getAttribute('aria-busy')).toBe('true')
+
+  await expect(pending.result).resolves.toBe('allowed-once')
   })
 
   it('keeps the audit reason intact and follows the UI language for presentation copy', () => {

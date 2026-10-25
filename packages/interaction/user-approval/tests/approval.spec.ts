@@ -83,6 +83,36 @@ describe('ApprovalService.request', () => {
     expect(Object.keys(appended[0]?.data ?? {}).sort()).toEqual(['id', 'toolName'])
   })
 
+  it('auto-approves every later ask after allowAllFor, still auditing each pair', async () => {
+    const ctx = await mounted()
+    const { agent, appended } = fakeAgent()
+    const answerer = vi.fn(() => Promise.resolve<ApprovalOutcome>('rejected'))
+    ctx.on('approval/request', answerer)
+    ctx.approval.allowAllFor(agent.session)
+    expect(ctx.approval.allowsAll(agent.session)).toBe(true)
+
+    await expect(ctx.approval.request(requestOf(agent))).resolves.toBe('allowed-once')
+    await expect(ctx.approval.request(requestOf(agent))).resolves.toBe('allowed-once')
+
+    // The interactive answerers are never asked, but every decision is audited.
+    expect(answerer).not.toHaveBeenCalled()
+    expect(appended.filter(e => e.type === 'approval/asked')).toHaveLength(2)
+    expect(appended.filter(e => e.type === 'approval/decided').map(e => e.data['outcome']))
+      .toEqual(['allowed-once', 'allowed-once'])
+  })
+
+  it('keeps an allow-all grant scoped to its own session', async () => {
+    const ctx = await mounted()
+    const granted = fakeAgent()
+    const other = fakeAgent()
+    ctx.approval.allowAllFor(granted.agent.session)
+
+    expect(ctx.approval.allowsAll(granted.agent.session)).toBe(true)
+    expect(ctx.approval.allowsAll(other.agent.session)).toBe(false)
+    // The other session still fails closed with no answerer composed.
+    await expect(ctx.approval.request(requestOf(other.agent))).resolves.toBe('unavailable')
+  })
+
   it('borrows the exact readonly request for scoped dispatch and audit', async () => {
     const ctx = await mounted()
     const { agent, appended } = fakeAgent()

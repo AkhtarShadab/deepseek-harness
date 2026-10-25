@@ -6,6 +6,7 @@ import type { ComposerChainProps } from '@deepseek-ai/dsh-client-ui-conversation
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { ApprovalPanel } from './ApprovalPanel.tsx'
@@ -96,6 +97,10 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: () => ({
       resolveReason: (reason: NonNullable<PendingApproval['displayReason']>) => ctx.locale.resolveText(reason),
+      allowAllApprovals: async (sessionId: SessionId) => {
+        const result = await ctx.remote.session.allowAllApprovals({ sessionId })
+        if (!result.ok) throw new Error(result.error.message)
+      },
     }),
     children: {
       'conversation.approval.detail': { kind: 'single', scope: 'session' },

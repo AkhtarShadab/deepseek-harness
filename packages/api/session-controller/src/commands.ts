@@ -35,6 +35,8 @@ import {
   type ApiSessionCreated,
 } from './agent.ts'
 import type {
+  SessionAllowAllApprovalsRequest,
+  SessionAllowAllApprovalsValue,
   SessionAttachmentRequest,
   SessionAttachmentValue,
   SessionCancelRequest,
@@ -215,6 +217,27 @@ export class SessionCommandController {
         {},
       )
     }
+  }
+
+  /**
+   * Grant the volatile "allow all" approval policy for one Session.
+   * @param request - Session identity to grant.
+   * @returns acknowledgement that the grant is active.
+   */
+  async allowAllApprovals(
+    request: SessionAllowAllApprovalsRequest,
+  ): Promise<SessionAllowAllApprovalsValue> {
+    const agent = await this.resolveAgent(request.sessionId)
+    const approval = this.ctx.get('approval')
+    if (approval === undefined) {
+      throw new RemoteError(
+        'session/approval-unavailable',
+        'this deployment mounts no approval service',
+        { sessionId: request.sessionId },
+      )
+    }
+    approval.allowAllFor(agent.session)
+    return { allowed: true }
   }
 
   /**

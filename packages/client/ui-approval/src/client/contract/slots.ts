@@ -183,6 +183,13 @@ export interface ApprovalInjected {
    * @returns text for the active UI language.
    */
   resolveReason(reason: NonNullable<ApprovalPresentationRequest['displayReason']>): string
+  /**
+   * Record the user's volatile "allow all" grant for one Session: later asks
+   * in this session resolve without prompting until the Session ends.
+   * @param sessionId - the Session whose approvals should stop prompting.
+   * @returns resolution after the Host recorded the grant.
+   */
+  allowAllApprovals(sessionId: SessionId): Promise<void>
 }
 
 /** Full props of the approval composer takeover. */

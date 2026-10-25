@@ -236,6 +236,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       readonly sessionId: SessionId
       readonly activity: readonly SessionActivity[]
     }
+    /** The deployment composes no approval service, so no grant can be recorded. */
+    'session/approval-unavailable': { readonly sessionId: SessionId }
     'subagent/not-found': {
       readonly parentSessionId: SessionId
       readonly childSessionId: SessionId
@@ -345,6 +347,16 @@ export interface SessionDeleteRequest {
 /** Acknowledgement that one Session was permanently deleted. */
 export interface SessionDeleteValue {
   readonly deleted: true
+}
+
+/** Session allow-all approval grant request. */
+export interface SessionAllowAllApprovalsRequest {
+  readonly sessionId: SessionId
+}
+
+/** Acknowledgement that the Session now auto-approves approval asks. */
+export interface SessionAllowAllApprovalsValue {
+  readonly allowed: true
 }
 
 /** Session fork request. */

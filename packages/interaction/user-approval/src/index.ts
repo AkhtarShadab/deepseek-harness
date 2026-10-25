@@ -73,6 +73,8 @@ export const APPROVAL_POLICIES: readonly ApprovalPolicy[] = ['ask', 'never']
 const NEVER_SENTENCE = 'Approval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).'
 /** Model-facing statement for an interactive policy that may still fail closed. */
 const ASK_SENTENCE = 'Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed.'
+/** Model-facing statement while the user's one-session allow-all grant is active. */
+const ALLOW_ALL_SENTENCE = 'Approval policy: allow all for this session. The user granted a session-scoped auto-approval, so asks that reach the approval service resolve as allowed without prompting until this session ends. Stay within the requested scope, avoid unnecessary escalations, and surface anything irreversible before doing it.'
 
 /**
  * Whether the log currently sits inside an open turn (a `turn/start` not yet
@@ -152,6 +154,14 @@ export class ApprovalService extends Service {
     policy: z.union(['ask', 'never'] as const).default('ask'),
   })
 
+  /**
+   * Sessions whose user granted "allow all" for their remaining lifetime in
+   * this process. Volatile by design: a WeakSet ends the grant with the
+   * Session object (agent disposal or restart), so it can never leak into a
+   * later conversation and never rewrites durable policy events.
+   */
+  private readonly allowAllSessions = new WeakSet<Session>()
+
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'approval')
 
@@ -167,11 +177,32 @@ export class ApprovalService extends Service {
           const agent = context.agent
           // A bare assemble() (tests, diagnostics) has no session to state.
           if (agent === undefined) return ''
+          if (this.allowsAll(agent.session)) return ALLOW_ALL_SENTENCE
           const policy = effective(agent)
           return policy === 'never' ? NEVER_SENTENCE : ASK_SENTENCE
         },
       })
     })
+  }
+
+  /**
+   * Grant "allow all" for one Session's remaining approval asks in this
+   * process. Every later ask still appends its audit pair and resolves
+   * `'allowed-once'` without reaching the interactive answerers. The grant is
+   * volatile: it ends with this Session object and is never persisted.
+   * @param session - the Session whose asks should stop prompting.
+   */
+  allowAllFor(session: Session): void {
+    this.allowAllSessions.add(session)
+  }
+
+  /**
+   * Whether the Session currently holds the volatile allow-all grant.
+   * @param session - the Session to test.
+   * @returns true while asks for this Session auto-approve.
+   */
+  allowsAll(session: Session): boolean {
+    return this.allowAllSessions.has(session)
   }
 
   /**
@@ -273,6 +304,9 @@ export class ApprovalService extends Service {
     // documented promise that 'never' rejects deterministically regardless
     // of registration order — only the service's own request path can.
     if (this.effectivePolicy(session) === 'never') return 'rejected'
+    // The user's session-scoped allow-all grant decides before any answerer,
+    // exactly like 'never': dispatch order cannot make a later prompt appear.
+    if (this.allowsAll(session)) return 'allowed-once'
     // Enter the promise chain BEFORE dispatching: a listener that throws
     // SYNCHRONOUSLY (before its first await) must land in the same rejection
     // path as an async one — `Promise.resolve(call())` would let it escape
