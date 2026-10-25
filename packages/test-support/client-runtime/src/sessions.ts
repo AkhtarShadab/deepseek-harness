@@ -311,7 +311,7 @@ export class TestSessions implements ISessions {
 
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
-    method: 'create' | 'refreshProjections' | 'refresh' | 'search' | 'fork'
+    method: 'create' | 'refreshProjections' | 'refresh' | 'search' | 'fork' | 'delete'
     args: unknown[]
   }[] = []
 
@@ -680,6 +680,16 @@ export class TestSessions implements ISessions {
   fork(opts: Parameters<ISessions['fork']>[0]): Promise<SessionId> {
     this.calls.push({ method: 'fork', args: [opts] })
     return Promise.resolve(opts.sessionId)
+  }
+
+  /**
+   * Delete a Session from the fixture catalog.
+   * @param sessionId - Session to remove.
+   * @returns an always-successful deletion receipt, recorded for assertions.
+   */
+  delete(sessionId: SessionId): Promise<{ ok: true; value: { deleted: true } }> {
+    this.calls.push({ method: 'delete', args: [sessionId] })
+    return this.remove(sessionId).then(() => ({ ok: true as const, value: { deleted: true as const } }))
   }
 
   /**

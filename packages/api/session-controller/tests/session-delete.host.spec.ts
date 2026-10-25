@@ -59,7 +59,10 @@ describe('sessions.delete', () => {
     ctx.provide('workspaceRegistry', registry as never)
     const deleteSession = vi.spyOn(registry, 'deleteSession')
 
-    const response = await remote(ctx).delete({ sessionId: sid('flag-passthrough'), stopActivity })
+    const response = await remote(ctx).delete({
+      sessionId: sid('flag-passthrough'),
+      ...(stopActivity === undefined ? {} : { stopActivity }),
+    })
 
     expect(response.ok).toBe(true)
     if (stopActivity === true) {

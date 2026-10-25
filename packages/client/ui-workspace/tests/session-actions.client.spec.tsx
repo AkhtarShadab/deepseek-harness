@@ -14,6 +14,7 @@ import type { WorkspaceId, SessionActivity, WorkspaceSnapshot } from '@deepseek-
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { GlobalStandardProps, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { allowAllAccess, bindSnapshotSelector, makeTranslate, SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -588,7 +589,7 @@ describe('SessionDeleteConfirmDialog', () => {
 
   it('offers Stop-and-delete once a plain delete was refused as active, and sends stopActivity', async () => {
     const refusal = new SessionDeleteError(
-      { code: 'session/delete-active', message: 'the session is active (turn)', details: { sessionId: sid('one'), activity: [{ kind: 'turn' }] } },
+      new RemoteError('session/delete-active', 'the session is active (turn)', { sessionId: sid('one'), activity: [{ kind: 'turn' }] }),
       sid('one'),
     )
     const deleteSession = vi.fn<SessionDeleteConfirmInjected['deleteSession']>()
