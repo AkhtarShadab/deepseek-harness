@@ -11,6 +11,8 @@ import type {} from '@deepseek-ai/dsh-client-file-upload'
 import { canOpenNativePath, nativeFileManager, nativeFileApplications, openNativeFileApplication, openNativeAssociatedPath, revealNativePath } from '@deepseek-ai/dsh-native-command'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-workspace'
+import type { SessionActivity } from '@deepseek-ai/dsh-workspace/types'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
@@ -43,6 +45,8 @@ import type {
   SessionControlFrame,
   SessionCreateRequest,
   SessionCreateValue,
+  SessionDeleteRequest,
+  SessionDeleteValue,
   SessionFollowFrame,
   SessionFollowRequest,
   SessionForkRequest,
@@ -450,6 +454,47 @@ export class SessionController extends TypertRemoteService {
       }
     }
     return this.commands.fork(request)
+  }
+
+  /**
+   * Permanently delete one Session: dispose its running work when asked, then
+   * remove its durable log and registry state. Removal reaches every Client
+   * through the `api-session/removed` relay once the Host Session store
+   * disposes the identity.
+   * @param request - Session identity and whether to stop its running work instead of refusing.
+   * @returns acknowledgement that the Session was deleted.
+   */
+  @Remote('delete')
+  async delete(request: SessionDeleteRequest): Promise<SessionDeleteValue> {
+    try {
+      await this.ctx.workspaceRegistry.deleteSession(
+        request.sessionId,
+        request.stopActivity === true ? { stopActivity: true } : {},
+      )
+    } catch (error) {
+      // Name-based mapping: these registry errors carry stable `name` values,
+      // and this endpoint is their only consumer outside the Workspace docs.
+      if (error instanceof Error && error.name === 'WorkspaceUnknownSessionError') {
+        throw new RemoteError(
+          'session/not-found',
+          error.message.replace('archive', 'delete'),
+          { sessionId: request.sessionId },
+          { cause: error },
+        )
+      }
+      if (error instanceof Error && error.name === 'WorkspaceActiveSessionError') {
+        const activity = (error as { readonly activity?: readonly SessionActivity[] }).activity ?? []
+        throw new RemoteError(
+          'session/delete-active',
+          `cannot delete session '${request.sessionId}': the session is active (${activity
+            .map(entry => entry.kind).join(', ')})`,
+          { sessionId: request.sessionId, activity },
+          { cause: error },
+        )
+      }
+      throw error
+    }
+    return { deleted: true }
   }
 
   /**

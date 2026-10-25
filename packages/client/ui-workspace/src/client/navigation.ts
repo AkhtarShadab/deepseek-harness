@@ -93,6 +93,14 @@ export interface UiWorkspace {
    */
   archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
   /**
+   * Permanently delete a Session on the Host and clear it when it is the
+   * current selection. Without `stopActivity` the Host refuses a Session with
+   * running work; with it the Host stops that work first.
+   * @param sessionId - Session to delete.
+   * @param options - `stopActivity` asks the Host to stop the Session's running work before deleting.
+   */
+  deleteSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
+  /**
    * Unarchive a Session, restoring it to its recorded Workspace position.
    * @param sessionId - Session to unarchive.
    */
@@ -145,6 +153,16 @@ export class DirectoryBrowseError extends Error {
   /** @param rpcError - Host directory business failure. */
   constructor(readonly rpcError: RemoteFailure) {
     super(`directory browse failed: ${rpcError.code}: ${rpcError.message}`)
+  }
+}
+
+/** Structured permanent-delete failure exposed to the delete dialog. */
+export class SessionDeleteError extends Error {
+  override readonly name = 'SessionDeleteError'
+
+  /** @param rpcError - Host deletion business or transport failure. */
+  constructor(readonly rpcError: RemoteFailure, readonly sessionId: SessionId) {
+    super(`session delete failed: ${rpcError.code}: ${rpcError.message}`)
   }
 }
 
@@ -366,6 +384,12 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   async archiveSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
     await this.workspaces.archiveSession(sessionId, options)
+    if (this.mainReference?.sessionId === sessionId) this.clearMain()
+  }
+
+  async deleteSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
+    const result = await this.sessions.delete(sessionId, options)
+    if (!result.ok) throw new SessionDeleteError(result.error, sessionId)
     if (this.mainReference?.sessionId === sessionId) this.clearMain()
   }
 

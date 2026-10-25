@@ -108,6 +108,12 @@ export interface SessionPersistenceListOptions {
   readonly signal?: AbortSignal
 }
 
+/** Options for {@link SessionPersistence.remove}. */
+export interface SessionPersistenceRemoveOptions {
+  /** Optional cancellation observed before backend removal work starts. */
+  readonly signal?: AbortSignal
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sessionPersistence: SessionPersistence
@@ -201,6 +207,23 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Permanently remove one stored session's durable artifact and release it
+   * from this backend's visibility: after a successful removal the session is
+   * absent from `stat`/`list` and cannot be reopened. A backend with open
+   * handles for the id refuses; the caller must close them first. Removal of
+   * an unknown id is not an error — other processes may already have removed
+   * it — so callers that need existence semantics check with `stat` first.
+   * See the [permanent session removal Agent
+   * Note](../../../.agents/notes/implemented/feature/2026-10-25-permanent-session-removal.md)
+   * for why deletion is hard, non-cascading, and user-gated.
+   * @param id - the stored session to remove.
+   * @param options - optional cancellation.
+   * @throws {SessionAlreadyOwnedError} when this process still holds write
+   *   ownership or another handle keeps the session live.
+   */
+  abstract remove(id: SessionId, options?: SessionPersistenceRemoveOptions): Promise<void>
 }
 
 export default SessionPersistence

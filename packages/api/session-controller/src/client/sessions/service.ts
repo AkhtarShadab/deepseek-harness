@@ -5,6 +5,7 @@ import { SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { SESSION_SEARCH_RESULT_LIMIT } from '../../types.ts'
+import type { SessionDeleteValue } from '../../types.ts'
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import {
   createSnapshotStore, notifySubscribers, type ObservableSnapshot, type SnapshotStore,
@@ -480,6 +481,23 @@ export class ClientSessions implements ISessions {
       if (!renamed.ok) throw new Error(`fork child rename failed: ${renamed.error.code}: ${renamed.error.message}`)
     }
     return childId
+  }
+
+  /**
+   * Permanently delete a Session on the Host. On success the row leaves the
+   * catalog through the `api-session/removed` relay; the returned receipt also
+   * lets a caller settle its own UI without waiting for that frame.
+   * @param sessionId - Session to delete.
+   * @param opts - whether the Host stops the Session's running work instead of refusing.
+   * @returns the deletion receipt or the folded Remote failure.
+   */
+  async delete(
+    sessionId: SessionId,
+    opts?: { readonly stopActivity?: boolean },
+  ): Promise<RemoteResult<SessionDeleteValue>> {
+    const result = await this.manager.delete(sessionId, opts ?? {})
+    if (result.ok) this.projectList()
+    return result
   }
 
   /**

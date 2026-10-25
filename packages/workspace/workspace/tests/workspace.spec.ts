@@ -56,7 +56,8 @@ async function harness(options: HarnessOptions = {}) {
     listed.map(header => ({ header, revision: SessionPersistenceRevision(`rev-${header.id}`) })))
   const open = vi.fn(() => { throw new Error('event bodies must not be opened') })
   const stat = vi.fn(() => { throw new Error('per-session stat must not be needed') })
-  ctx.provide('sessionPersistence', { list, open, stat } as never)
+  const remove = vi.fn(async (_id: SessionId) => {})
+  ctx.provide('sessionPersistence', { list, open, stat, remove } as never)
 
   if (options.sessionStore === true) {
     await ctx.plugin(SessionStore)
@@ -83,6 +84,7 @@ async function harness(options: HarnessOptions = {}) {
     list,
     open,
     stat,
+    remove,
     setSessions: (headers: SessionHeader[]) => { listed = headers },
   }
 }
@@ -1260,6 +1262,133 @@ describe('registry-global session unarchive', () => {
 
     const second = await harness({ pool, sessions })
     expect(second.registry.archivedSessionIds).toEqual(['kept'])
+  })
+})
+
+describe('registry-global session delete', () => {
+  it('deletes a quiet stored session: drops log, account, archive, and pin references', async () => {
+    const dir = await makeDir('delete-quiet')
+    const pool = new MemoryMediaPool()
+    const sessions = [header('one', dir, 100), header('two', dir, 200)]
+    const result = await harness({ pool, sessions })
+    const workspace = result.registry.list()[0]!
+    await result.registry.pinSession(SessionId('one'))
+    await result.registry.archiveSession(SessionId('two'))
+    expect(workspace.sessionIds).toEqual(['two', 'one'])
+
+    await result.registry.deleteSession(SessionId('one'))
+    expect(result.remove).toHaveBeenCalledTimes(1)
+    expect(result.remove).toHaveBeenCalledWith(SessionId('one'))
+    expect(result.registry.pinnedSessionIds).toEqual([])
+    expect(result.registry.archivedSessionIds).toEqual(['two'])
+    expect(storedRecord(pool, workspace.id).sessionIds).toEqual(['two'])
+    expect(storedState(pool).pinnedSessionIds).toEqual([])
+
+    await result.registry.deleteSession(SessionId('two'))
+    expect(result.registry.archivedSessionIds).toEqual([])
+    expect(storedRecord(pool, workspace.id).sessionIds).toEqual([])
+    expect(storedState(pool).archivedSessionIds).toEqual([])
+
+    // Durable reload sees neither deleted id in any set or account.
+    await result.fiber.dispose()
+    const second = await harness({ pool, sessions: [] })
+    expect(second.registry.list()[0]?.sessionIds ?? []).not.toContain('one')
+    expect(second.registry.list()[0]?.sessionIds ?? []).not.toContain('two')
+    expect(second.registry.archivedSessionIds).toEqual([])
+    expect(second.registry.pinnedSessionIds).toEqual([])
+  })
+
+  it('rejects an unknown id without removing or writing anything', async () => {
+    const dir = await makeDir('delete-unknown')
+    const result = await harness({ sessions: [header('kept', dir, 100)] })
+    await expect(result.registry.deleteSession(SessionId('ghost'))).rejects.toMatchObject({
+      name: 'WorkspaceUnknownSessionError',
+      sessionId: 'ghost',
+    })
+    await expect(result.registry.deleteSession(SessionId('ghost')))
+      .rejects.toThrow("cannot delete session 'ghost'")
+    expect(result.remove).not.toHaveBeenCalled()
+    expect(storedState(result.pool).archivedSessionIds).toEqual([])
+    expect(storedState(result.pool).pinnedSessionIds).toEqual([])
+  })
+
+  it('propagates a persistence-listing failure instead of reporting an unknown session', async () => {
+    const dir = await makeDir('delete-list-failure')
+    const result = await harness({ sessions: [header('kept', dir, 100)] })
+    // 'ghost' is not in the startup index, so its existence check must list
+    // persistence; a failing listing propagates rather than masquerading as a miss.
+    result.list.mockRejectedValueOnce(new Error('persistence backend down'))
+    await expect(result.registry.deleteSession(SessionId('ghost'))).rejects.toThrow('persistence backend down')
+    expect(result.remove).not.toHaveBeenCalled()
+  })
+
+  it('refuses a session the activity waterfall reports active and removes nothing', async () => {
+    const dir = await makeDir('delete-active')
+    const result = await harness({ sessions: [header('busy', dir, 100), header('quiet', dir, 200)] })
+    result.ctx.on('workspace/session-activity', async ({ sessionId }, next) => {
+      const rest = await next()
+      return sessionId === 'busy' ? [{ kind: 'probe' }, ...rest] : rest
+    })
+
+    await expect(result.registry.deleteSession(SessionId('busy'))).rejects.toMatchObject({
+      name: 'WorkspaceActiveSessionError',
+      sessionId: 'busy',
+    })
+    expect(result.remove).not.toHaveBeenCalled()
+    expect(storedState(result.pool).archivedSessionIds).toEqual([])
+
+    await result.registry.deleteSession(SessionId('quiet'))
+    expect(result.remove).toHaveBeenCalledTimes(1)
+    expect(result.remove).toHaveBeenCalledWith(SessionId('quiet'))
+  })
+
+  it('with stopActivity, stops providers and disposes the live Agent before removing the log', async () => {
+    const dir = await makeDir('delete-stop-dispose')
+    const result = await harness({ sessions: [header('busy', dir, 100)] })
+    const order: string[] = []
+    result.remove.mockImplementation(async () => { order.push('remove') })
+    result.ctx.on('workspace/session-stop', ({ sessionId }) => { order.push(`stop:${sessionId}`) })
+    result.ctx.on('workspace/session-dispose', ({ sessionId }) => { order.push(`dispose:${sessionId}`) })
+    result.ctx.on('domain/changed', (change) => { if (change.table === '') order.push('write') })
+
+    await result.registry.deleteSession(SessionId('busy'), { stopActivity: true })
+
+    expect(order).toEqual(['stop:busy', 'dispose:busy', 'remove', 'write'])
+    expect(result.remove).toHaveBeenCalledTimes(1)
+  })
+
+  it('logs a failing dispose listener and still removes the durable log', async () => {
+    const dir = await makeDir('delete-dispose-failure')
+    const result = await harness({ sessions: [header('busy', dir, 100)] })
+    result.ctx.on('workspace/session-dispose', () => { throw new Error('dispose exploded') })
+    const warn = vi.spyOn(result.ctx.logger, 'warn').mockImplementation(() => {})
+
+    await result.registry.deleteSession(SessionId('busy'), { stopActivity: true })
+
+    expect(result.remove).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("disposing session 'busy' for delete failed"))
+  })
+
+  it('drops the session from persistence even when no provider owns it', async () => {
+    const dir = await makeDir('delete-unowned')
+    const result = await harness({ sessions: [header('lonely', dir, 100)] })
+    await result.registry.deleteSession(SessionId('lonely'), { stopActivity: true })
+    expect(result.remove).toHaveBeenCalledTimes(1)
+  })
+
+  it('never touches descendant sessions', async () => {
+    const dir = await makeDir('delete-no-cascade')
+    const parent = header('parent', dir, 100)
+    const child = { ...header('child', dir, 200), parentSession: parent.id }
+    const result = await harness({ sessions: [parent, child] })
+    const workspace = result.registry.list()[0]!
+    expect(workspace.sessionIds).toContain('child')
+
+    await result.registry.deleteSession(SessionId('parent'))
+
+    expect(result.remove).toHaveBeenCalledTimes(1)
+    expect(result.remove).toHaveBeenCalledWith(SessionId('parent'))
+    expect(result.registry.list()[0]?.sessionIds).toEqual(['child'])
   })
 })
 

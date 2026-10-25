@@ -7,6 +7,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type {
   SessionControlBaseline,
   SessionControlFrame,
+  SessionDeleteValue,
   SessionProjectionHints,
   SessionRenameValue,
   SessionSummary,
@@ -587,6 +588,23 @@ export class SessionManager {
       this.projectionStore(sessionId).apply('title', result.value.title, SessionSeq(result.value.seq))
     }
     return result
+  }
+
+  /**
+   * Permanently delete a Session on the Host. The row leaves the list through
+   * the `api-session/removed` relay, so this applies no local mutation.
+   * @param sessionId - Session to delete.
+   * @param opts - whether the Host stops the Session's running work instead of refusing.
+   * @returns the deletion receipt, or the Remote failure.
+   */
+  async delete(
+    sessionId: SessionId,
+    opts: { readonly stopActivity?: boolean } = {},
+  ): Promise<RemoteResult<SessionDeleteValue>> {
+    return this.remote.session.delete({
+      sessionId,
+      ...(opts.stopActivity === true ? { stopActivity: true } : {}),
+    })
   }
 
   /**

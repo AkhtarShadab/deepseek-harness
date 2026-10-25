@@ -12,7 +12,7 @@ import { createClientTest, webApp } from '@deepseek-ai/dsh-client-test-runtime/s
 import { ClientSessions, SessionCreateError, SessionForkError } from '../src/client/sessions/service.ts'
 import { scopeOf } from '../src/client/scope.ts'
 import type {
-  SessionAssistantStreamBaseline, SessionFollowFrame, SessionFollowRequest,
+  SessionAssistantStreamBaseline, SessionDeleteValue, SessionFollowFrame, SessionFollowRequest,
 } from '../src/types.ts'
 import { FOLLOW, err, followScript, sessionWorld } from './remote/session.client.ts'
 
@@ -1048,6 +1048,61 @@ describe('fork', () => {
     expect(b.svc.binding(sid('child'))).toBeUndefined()
     expect(b.svc.retainInfo(sid('child')).getSnapshot().referenceCount).toBe(0)
     expect(b.mock.log.requests(FOLLOW)).toHaveLength(0)
+  })
+})
+
+describe('delete', () => {
+  it('forwards the identity and stopActivity flag without touching the catalog', async ({ bench }) => {
+    const b = bench()
+    await feedList(b, [{ id: 's1' }])
+    b.mock.remote.session.delete.mockResolvedValue(ok({ deleted: true } satisfies SessionDeleteValue))
+
+    await expect(b.svc.delete(sid('s1'), { stopActivity: true })).resolves.toEqual({
+      ok: true,
+      value: { deleted: true },
+    })
+
+    expect(b.mock.remote.session.delete).toHaveBeenCalledExactlyOnceWith({ sessionId: 's1', stopActivity: true })
+    // Deletion leaves the row only when the removal relay lands; the receipt alone mutates nothing.
+    expect(b.svc.list.getSnapshot().ids).toContain(sid('s1'))
+  })
+
+  it('omits stopActivity when the caller does not ask the Host to stop work', async ({ bench }) => {
+    const b = bench()
+    b.mock.remote.session.delete.mockResolvedValue(ok({ deleted: true } satisfies SessionDeleteValue))
+
+    await expect(b.svc.delete(sid('s1'))).resolves.toEqual({ ok: true, value: { deleted: true } })
+
+    expect(b.mock.remote.session.delete).toHaveBeenCalledExactlyOnceWith({ sessionId: 's1' })
+  })
+
+  it('surfaces the active refusal as the typed failure result', async ({ bench }) => {
+    const b = bench()
+    await feedList(b, [{ id: 's1' }])
+    const refusal = new RemoteError('session/delete-active', 'the session is active (turn)', {
+      sessionId: sid('s1'),
+      activity: [{ kind: 'turn' }],
+    })
+    b.mock.remote.session.delete.mockResolvedValue(err(refusal))
+
+    await expect(b.svc.delete(sid('s1'))).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'session/delete-active', details: { sessionId: 's1' } },
+    })
+    expect(b.svc.list.getSnapshot().ids).toContain(sid('s1'))
+  })
+
+  it('drops the catalog row when the removal relay arrives after the receipt', async ({ bench }) => {
+    const b = bench()
+    await feedList(b, [{ id: 's1' }, { id: 's2' }])
+    b.mock.remote.session.delete.mockResolvedValue(ok({ deleted: true } satisfies SessionDeleteValue))
+
+    await expect(b.svc.delete(sid('s1'))).resolves.toEqual({ ok: true, value: { deleted: true } })
+    b.svc.handleSessionRemoved(sid('s1'))
+    await Promise.resolve()
+
+    expect(b.svc.list.getSnapshot().ids).toEqual([sid('s2')])
+    expect(b.svc.list.getSnapshot().byId[sid('s1')]).toBeUndefined()
   })
 })
 

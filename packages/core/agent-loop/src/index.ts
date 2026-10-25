@@ -31,6 +31,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-workspace'
 import { ReactLoopAgent } from './agent.ts'
 import { inboxProjectionDefinition } from './inbox.ts'
 import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
@@ -361,6 +362,10 @@ export class AgentLoop extends Service implements AgentFactory {
   private readonly ownership: FactoryOwnership
   /** Plain holder prevents Cordis from re-tracing the factory's dependency context through a caller shadow. */
   private readonly runtime: { ctx: Context }
+  /** Published sessions mapped to their memoized disposal, for `workspace/session-dispose`. */
+  private readonly liveHandles = new Map<SessionId, { dispose(): Promise<void> }>()
+  /** Sessions whose delete-driven teardown is still draining registries. */
+  private readonly releasing = new Set<SessionId>()
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'agentLoop')
@@ -386,6 +391,19 @@ export class AgentLoop extends Service implements AgentFactory {
       })
     }, 'agentLoop.transactions()')
     ctx.effect(() => ctx.agents.setFactory(this), 'agentLoop.setFactory()')
+    // Deletion owns the loop's ordered teardown: stop the driver, drain and
+    // close the write handle, leave both registries, unwind the scope. The
+    // factory keeps the live-handle map for exactly this disposal capability.
+    ctx.on('workspace/session-dispose', ({ sessionId }) => {
+      const entry = this.liveHandles.get(sessionId)
+      if (entry === undefined) return
+      this.releasing.add(sessionId)
+      void entry.dispose().finally(() => {
+        this.releasing.delete(sessionId)
+        if (this.liveHandles.get(sessionId) === entry) this.liveHandles.delete(sessionId)
+      })
+    })
+
     ctx.systemPrompt.variable('provider', context => context.agent?.options.provider)
     ctx.systemPrompt.variable('model', context => context.agent?.options.model)
 
@@ -467,13 +485,16 @@ export class AgentLoop extends Service implements AgentFactory {
 
   /** Wait for a draining same-id lifecycle to finish registry teardown. */
   private async waitForDrainingConfiguredIdentity(ownerCtx: Context, sessionId: SessionId): Promise<void> {
-    // Only an id still occupying a registry needs waiting for; a live healthy
-    // occupant is a collision the create/resume below will surface itself.
-    if (ownerCtx.agents.get(sessionId) === undefined && ownerCtx.sessions.get(sessionId) === undefined) return
+    // Only an id still occupying a registry or mid-delete needs waiting for; a
+    // live healthy occupant is a collision the create/resume below will
+    // surface itself.
+    if (!this.releasing.has(sessionId)
+      && ownerCtx.agents.get(sessionId) === undefined && ownerCtx.sessions.get(sessionId) === undefined) return
 
     const released = Promise.withResolvers<void>()
     const checkReleased = (): void => {
-      if (ownerCtx.agents.get(sessionId) === undefined && ownerCtx.sessions.get(sessionId) === undefined) {
+      if (ownerCtx.agents.get(sessionId) === undefined && ownerCtx.sessions.get(sessionId) === undefined
+        && !this.releasing.has(sessionId)) {
         released.resolve()
       }
     }
@@ -591,13 +612,16 @@ export class AgentLoop extends Service implements AgentFactory {
     })())
     let unfollowScope: (() => Promise<void> | void) | undefined
     let unfollowOwner: () => Promise<void> | void
+    const handleEntry: { dispose(): Promise<void> } = { dispose: async () => {} }
     const dispose = async (): Promise<void> => {
       try {
         await teardown()
       } finally {
+        if (this.liveHandles.get(id) === handleEntry) this.liveHandles.delete(id)
         await Promise.all([unfollowOwner(), unfollowScope?.()])
       }
     }
+    handleEntry.dispose = dispose
     const untrack = this.ownership.track(dispose)
     try {
       unfollowOwner = ownerCtx.effect(function* () {
@@ -659,6 +683,7 @@ export class AgentLoop extends Service implements AgentFactory {
             assertLive()
             await loopCtx.agents.announce(agent, source, abort.signal)
             assertLive()
+            this.liveHandles.set(id, handleEntry)
             return { agent, dispose }
           } finally {
             publication.resolve()

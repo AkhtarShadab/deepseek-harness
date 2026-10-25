@@ -391,6 +391,49 @@ export interface ForkSessionInjected {
   forkSession: (sessionId: SessionId) => void
 }
 
+/**
+ * Delete action share (menu row and dialog). The row raises the confirmation;
+ * the dialog's hop carries the whole behavior: the Host call, clearing the
+ * selection when the deleted Session is current, and rejections surfaced in
+ * the dialog itself.
+ */
+export interface DeleteSessionInjected {
+  /** Ask for the permanent-delete confirmation, seeded with the row's title. */
+  requestSessionDelete: (sessionId: SessionId, displayTitle: string) => void
+}
+
+/**
+ * A permanent-delete confirmation the delete action asked for. `activity` is
+ * present only after the Host refused a running Session; the dialog offers
+ * Stop-and-delete while it names what still runs.
+ */
+export interface SessionDeleteRequest {
+  /** Session to delete. */
+  sessionId: SessionId
+  /** The row's display title, named in the dialog. */
+  displayTitle: string
+  /** What the Host reported running, once a plain delete was refused. */
+  activity?: readonly SessionActivity[]
+  /** Replace the stale activity list after a fresh refusal without remounting the dialog. */
+  setActivity: (activity: readonly SessionActivity[]) => void
+}
+
+/** Delete dialog share: the pending request, its settlement, and the delete hop the dialog confirms with. */
+export interface SessionDeleteConfirmInjected {
+  hooks: {
+    /** The delete asked for, until the dialog consumes or cancels it. */
+    deleteRequest: HostObservable<SessionDeleteRequest | null>
+  }
+  /** Consume or cancel the pending request. */
+  settleSessionDelete: () => void
+  /**
+   * Delete a Session permanently; with `stopActivity` the Host stops its
+   * running work first. Resolves on the deletion receipt; the row leaves the
+   * catalog when the removal relay lands.
+   */
+  deleteSession: (sessionId: SessionId, options?: { readonly stopActivity?: boolean }) => Promise<void>
+}
+
 /** Rename action share: the row only raises the request; the dialog entry answers it. */
 export interface RenameSessionInjected {
   /** Ask for the rename dialog, seeded with the row's current title. */
@@ -456,6 +499,13 @@ export type SessionArchiveConfirmProps =
   & PropsLocale<'workspace'>
   & Omit<SessionArchiveConfirmInjected, 'hooks'>
   & PropsHooks<SessionArchiveConfirmInjected['hooks']>
+
+/** Props of the permanent-delete dialog entry in `shell.overlay`. */
+export type SessionDeleteConfirmProps =
+  PropsRuntime<'shell.overlay'>
+  & PropsLocale<'workspace'>
+  & Omit<SessionDeleteConfirmInjected, 'hooks'>
+  & PropsHooks<SessionDeleteConfirmInjected['hooks']>
 
 /** Props of the existing overlay's keyed notice dispatcher. */
 export type RowToastProps =

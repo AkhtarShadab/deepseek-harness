@@ -36,6 +36,9 @@
       "path": "../../core/agent"
     },
     {
+      "path": "../../workspace/workspace"
+    },
+    {
       "path": "../../core/scope"
     },
     {

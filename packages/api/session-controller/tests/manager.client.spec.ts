@@ -710,6 +710,31 @@ describe('search', () => {
   })
 })
 
+describe('delete', () => {
+  it('forwards the deletion request payload verbatim', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    remote.session.delete.mockResolvedValue(ok({ deleted: true }))
+
+    await expect(manager.delete(S1, { stopActivity: true })).resolves.toEqual({ ok: true, value: { deleted: true } })
+    expect(remote.session.delete).toHaveBeenCalledExactlyOnceWith({ sessionId: S1, stopActivity: true })
+  })
+
+  it('applies no local list mutation before the removal relay lands', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    manager.handleSessionAdded(summary(S1))
+    remote.session.delete.mockResolvedValue(err(new RemoteError('session/delete-active', 'active', {
+      sessionId: S1,
+      activity: [],
+    })))
+
+    await expect(manager.delete(S1)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'session/delete-active' },
+    })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+  })
+})
+
 describe('Host Remote event routing', () => {
   it('adds/removes/flips sessions and keeps removed instances resident', async ({ mock, remote }) => {
     const manager = makeManager(mock, remote)

@@ -23,12 +23,13 @@ import pLimit, { type LimitFunction } from 'p-limit'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
-  SessionAlreadyExistsError, SessionPersistenceNotFoundError,
+  SessionAlreadyExistsError, SessionAlreadyOwnedError, SessionPersistenceNotFoundError,
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
   type SessionHandleReadResult,
   type SessionLocation, type SessionPersistenceCreateOptions,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
+  type SessionPersistenceRemoveOptions,
   type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
@@ -559,6 +560,44 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     signal?.throwIfAborted()
     return snapshots
+  }
+
+  /**
+   * Permanently remove one stored session's durable artifacts: every project
+   * directory naming this id is deleted recursively, so stale duplicate
+   * directories disappear with it. A live claim or open handle of either
+   * access in this process refuses; an unknown id resolves without error. The
+   * `session.lock` file inside each deleted directory goes with the directory;
+   * lease release never removes it. Cached observations for the id drop on
+   * success.
+   * @param id - the stored session to remove.
+   * @param options - optional cancellation observed before and between removal reads.
+   * @throws {SessionAlreadyOwnedError} when this process still holds write
+   *   ownership or another open handle keeps the session live.
+   */
+  async remove(id: SessionId, options?: SessionPersistenceRemoveOptions): Promise<void> {
+    options?.signal?.throwIfAborted()
+    if (this.tracker.isLive(id)) throw new SessionAlreadyOwnedError(id)
+    await this.ensureRootEncoding()
+    const projects = await this.listProjectDirs(options?.signal)
+    // Resolve every candidate directory before deleting any: a legacy
+    // flat-file artifact then aborts the removal unchanged, exactly as
+    // findLog refuses to select across such a layout.
+    const dirs: string[] = []
+    for (const project of projects) {
+      options?.signal?.throwIfAborted()
+      await this.rejectLegacyFlatArtifact(project, id, options?.signal)
+      dirs.push(join(project, encodeSegment(id)))
+    }
+    for (const dir of dirs) {
+      options?.signal?.throwIfAborted()
+      // `force` makes an absent directory a no-op, so removing an unknown or
+      // already-removed id succeeds.
+      await rm(dir, { recursive: true, force: true })
+    }
+    options?.signal?.throwIfAborted()
+    this.coldLogMemo.delete(id)
+    this.migrationPreparations.delete(id)
   }
 
   // --- handle-facing storage internals (package-private via the handle class below) ---

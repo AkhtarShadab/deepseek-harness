@@ -11,7 +11,7 @@ import type { SessionId, SessionSeqCursor } from '@deepseek-ai/dsh-session/types
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
+import type { SessionActivity, WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
@@ -227,6 +227,15 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'session/title-invalid': { readonly sessionId: SessionId }
     'session/fork-unavailable': { readonly sessionId: SessionId }
     'session/migration-required': { readonly sessionId: SessionId }
+    /**
+     * The Session still has running work — its own turn, a subagent, a
+     * background job, or an active schedule — so permanent deletion was
+     * refused without a write; `activity` names what must stop first.
+     */
+    'session/delete-active': {
+      readonly sessionId: SessionId
+      readonly activity: readonly SessionActivity[]
+    }
     'subagent/not-found': {
       readonly parentSessionId: SessionId
       readonly childSessionId: SessionId
@@ -324,6 +333,18 @@ export interface SessionRenameRequest {
 export interface SessionRenameValue {
   readonly title: string
   readonly seq: number
+}
+
+/** Session permanent-deletion request. */
+export interface SessionDeleteRequest {
+  readonly sessionId: SessionId
+  /** True asks the Host to stop the Session's running work before deleting; omission refuses a Session that still runs work. */
+  readonly stopActivity?: boolean
+}
+
+/** Acknowledgement that one Session was permanently deleted. */
+export interface SessionDeleteValue {
+  readonly deleted: true
 }
 
 /** Session fork request. */

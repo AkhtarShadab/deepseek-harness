@@ -458,6 +458,22 @@ export class JsonlBackendTracker {
   }
 
   /**
+   * Whether this process still tracks live state for a session: an active or
+   * mid-construction write claim, an open handle of either access, or a
+   * created-but-unmaterialized pending entry. A read handle keeps its session
+   * live through `openHandles`, so removal refuses while any handle is open.
+   * @param id - the session to test.
+   * @returns true while this backend must not discard the session's storage.
+   */
+  isLive(id: SessionId): boolean {
+    if (this.writers.has(id) || this.pending.has(id)) return true
+    for (const handle of this.openHandles) {
+      if (handle.id === id) return true
+    }
+    return false
+  }
+
+  /**
    * Iterate the pending sessions for listing.
    * @returns the pending entries, keyed by session id.
    */

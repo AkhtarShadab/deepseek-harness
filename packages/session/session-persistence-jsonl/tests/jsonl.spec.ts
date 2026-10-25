@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { scheduler } from 'node:timers/promises'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import { SessionAlreadyOwnedError, SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import {
@@ -2888,5 +2889,78 @@ describe('JsonlSessionPersistence listing concurrency', () => {
     await expect(listingCtx.sessionPersistence.list()).rejects.toBe(laterSessionFailure)
     listingProbe.failures.set(earlierSession, earlierSessionFailure)
     await expect(listingCtx.sessionPersistence.list()).rejects.toBe(earlierSessionFailure)
+  })
+})
+
+describe('JsonlSessionPersistence remove', () => {
+  let ctx: Context
+  beforeEach(async () => {
+    root = await freshRoot()
+    ctx = new Context()
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+  })
+  afterEach(async () => { await ctx.fiber.dispose() })
+
+  it('removes a materialized session and resolves a repeated removal', async () => {
+    const m = meta('remove-happy', '/work')
+    const handle = await ctx.sessionPersistence.create(m)
+    await handle.append(oneTurnLog())
+    await handle.flush()
+    await handle.close()
+    expect(await ctx.sessionPersistence.stat(m.id)).toBeDefined()
+    expect((await ctx.sessionPersistence.list()).map(s => s.header.id)).toContain(m.id)
+
+    await ctx.sessionPersistence.remove(m.id)
+
+    expect(await ctx.sessionPersistence.stat(m.id)).toBeUndefined()
+    expect((await ctx.sessionPersistence.list()).map(s => s.header.id)).not.toContain(m.id)
+    await expect(ctx.sessionPersistence.open(m.id, 'read')).rejects.toBeInstanceOf(SessionPersistenceNotFoundError)
+    await expect(ctx.sessionPersistence.open(m.id, 'write')).rejects.toBeInstanceOf(SessionPersistenceNotFoundError)
+    await expect(stat(sessionDir(root, m.cwd, m.id))).rejects.toMatchObject({ code: 'ENOENT' })
+    // An unknown id and an already-removed id both resolve without error.
+    await expect(ctx.sessionPersistence.remove(m.id)).resolves.toBeUndefined()
+    await expect(ctx.sessionPersistence.remove(SessionId('never-existed'))).resolves.toBeUndefined()
+  })
+
+  it('refuses while a write handle owns the session and succeeds after its close', async () => {
+    const m = meta('remove-owned', '/work')
+    const writer = await ctx.sessionPersistence.create(m)
+    await writer.append(oneTurnLog())
+    await writer.flush()
+    await expect(ctx.sessionPersistence.remove(m.id)).rejects.toBeInstanceOf(SessionAlreadyOwnedError)
+
+    await writer.close()
+    await expect(ctx.sessionPersistence.remove(m.id)).resolves.toBeUndefined()
+    expect(await ctx.sessionPersistence.stat(m.id)).toBeUndefined()
+  })
+
+  it('refuses while a read handle keeps the session live and succeeds after its close', async () => {
+    const m = meta('remove-read-live', '/work')
+    await writeLog(ctx.sessionPersistence, m, oneTurnLog())
+    const reader = await ctx.sessionPersistence.open(m.id, 'read')
+    await expect(ctx.sessionPersistence.remove(m.id)).rejects.toBeInstanceOf(SessionAlreadyOwnedError)
+    await reader.close()
+    await expect(ctx.sessionPersistence.remove(m.id)).resolves.toBeUndefined()
+    expect(await ctx.sessionPersistence.stat(m.id)).toBeUndefined()
+  })
+
+  it('refuses an unmaterialized created session and drops it when its creator closes', async () => {
+    const m = meta('remove-pending', '/work')
+    const creator = await ctx.sessionPersistence.create(m)
+    await expect(ctx.sessionPersistence.remove(m.id)).rejects.toBeInstanceOf(SessionAlreadyOwnedError)
+    await creator.close()
+    // Close erased the pending entry without materializing; removal is a no-op and the id is free.
+    await expect(ctx.sessionPersistence.remove(m.id)).resolves.toBeUndefined()
+    const replacement = await ctx.sessionPersistence.create(m)
+    await replacement.flush()
+    await replacement.close()
+    expect(await ctx.sessionPersistence.stat(m.id)).toBeDefined()
+  })
+
+  it('aborts a removal whose signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(ctx.sessionPersistence.remove(SessionId('remove-aborted'), { signal: controller.signal }))
+      .rejects.toBe(controller.signal.reason)
   })
 })

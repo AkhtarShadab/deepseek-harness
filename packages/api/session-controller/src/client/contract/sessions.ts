@@ -9,6 +9,7 @@ import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { SessionDeleteValue } from '../../types.ts'
 import type { AgentContext } from '../scope.ts'
 import type { SessionSearchResultItem } from '../sessions/manager.ts'
 import type { SessionBinding, SessionListState } from '../sessions/service.ts'
@@ -140,6 +141,18 @@ export interface ISessions {
     /** False refuses source migration; omission preserves the Host default. */
     allowMigration?: boolean
   }): Promise<SessionId>
+  /**
+   * Permanently delete one Session on the Host. Without `stopActivity` a
+   * Session with running work is refused as `session/delete-active`, whose
+   * details name what still runs; with it, the Host stops that work first.
+   * @param sessionId - Session to delete.
+   * @param opts - whether the Host stops running work instead of refusing.
+   * @returns the deletion receipt or the folded Remote failure.
+   */
+  delete(
+    sessionId: SessionId,
+    opts?: { readonly stopActivity?: boolean },
+  ): Promise<RemoteResult<SessionDeleteValue>>
   /**
    * Borrow an already-retained Agent-scoped Context without extending its lifetime.
    * @param id - session id.
